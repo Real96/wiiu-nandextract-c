@@ -3,7 +3,7 @@
  *
  *  This file was ported from Wii NAND Extractor.
  *  Copyright (C) 2009 Ben Wilson
- *  
+ *
  *  Wii NAND Extractor is free software: you can redistribute it and/or
  *  modify it under the terms of the GNU General Public License as published
  *  by the Free Software Foundation, either version 3 of the License, or
@@ -23,8 +23,18 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
-#include <io.h>
 #include "aes.h"
+
+#ifdef _WIN32
+	#include <io.h>
+	int maxFileNameSize = _MAX_FNAME;
+	int maxPathNameSize = _MAX_PATH;
+#elif  __linux__
+	#include <errno.h>
+	#include <sys/stat.h>
+	int maxFileNameSize = FILENAME_MAX;
+	int maxPathNameSize = PATH_MAX;
+#endif
 
 byte_t* key;
 FILE* rom;
@@ -37,7 +47,16 @@ NandType nandType;
 char* nandName;
 int8_t initSuccess = 0;
 
-char* stringReplaceAll(const char *search, const char *replace, char *string) 
+void makeDirectory(const char* name)
+{
+#ifdef __linux__
+    mkdir(name, 0777);
+#elif _WIN32
+    mkdir(name);
+#endif
+}
+
+char* stringReplaceAll(const char *search, const char *replace, char *string)
 {
 	char* searchStart = strstr(string, search);
 	while (searchStart != NULL)
@@ -61,7 +80,7 @@ char* stringReplaceAll(const char *search, const char *replace, char *string)
 
 		searchStart = strstr(string, search);
 	}
-	
+
 	return string;
 }
 
@@ -72,7 +91,7 @@ int main(int argc, char* argv[])
 		printf("not enough args\n");
 		return 0;
 	}
-	
+
 	//init nand
 
 	rom = fopen(argv[1], "rb");
@@ -91,12 +110,12 @@ int main(int argc, char* argv[])
 		printf("can't find superblock!\n");
 		return 0;
 	}
-	
+
 	int32_t fatlen = getClusterSize() * 4;
 	loc_fat = loc_super;
 	loc_fst = loc_fat + 0x0C + fatlen;
 
-	nandName = calloc(_MAX_FNAME, sizeof(char));
+	nandName = calloc(maxFileNameSize, sizeof(char));
 	sscanf(argv[1], "%[^.]", nandName);
 
 	initSuccess = 1;
@@ -166,7 +185,7 @@ uint8_t getNandType(void)
 uint8_t getKey(void)
 {
 	//TODO key from text
-	
+
 	if (fileType == BootMii)
 	{
 		rewind(rom);
@@ -174,14 +193,14 @@ uint8_t getKey(void)
 		byte_t* bootmiikey = calloc(16, sizeof(byte_t));
 		fread(bootmiikey, sizeof(byte_t), 16, rom);
 		key = bootmiikey;
-		return 1; 
+		return 1;
 	}
 	else
 	{
 		key = readOTP("otp.bin");
 		if (key != NULL)
 			return 1;
-		
+	
 		if (nandType == Wii)
 		{
 			key = readKeyfile("keys.bin");
@@ -204,7 +223,7 @@ byte_t* readKeyfile(char* path)
 		free(retval);
 		return NULL;
 	}
-	
+
 	fseek(keyfile, 0x158, SEEK_SET);
 	fread(retval, sizeof(byte_t), 16, keyfile);
 	fclose(keyfile);
@@ -313,7 +332,7 @@ fst_t getFST(uint16_t entry)
 	{
 		fread(&size, sizeof(uint32_t), 1, rom);
 	}
-	
+
 	size = bswap32(size);
 	fst.size = size;
 
@@ -344,8 +363,8 @@ void extractNand(void)
 		printf("NAND has not been initialized successfully!");
 		return;
 	}
-	
-	mkdir(nandName);
+
+	makeDirectory(nandName);
 	extractFST(0, "");
 }
 
@@ -413,14 +432,14 @@ void extractFST(uint16_t entry, char* parent)
 
 void extractDir(fst_t fst, uint16_t entry, char* parent)
 {
-	char* filename = malloc(_MAX_PATH);
+	char* filename = malloc(maxPathNameSize);
 	snprintf(filename, 13, "%s", fst.filename);
 	//strncpy(filename, (char*) fst.filename, 12);
 
-	char* newfilename = malloc(_MAX_PATH);
+	char* newfilename = malloc(maxPathNameSize);
 	newfilename[0] = '\0';
 
-	char* path = malloc(_MAX_PATH);
+	char* path = malloc(maxPathNameSize);
 	path[0] = '\0';
 
 
@@ -443,8 +462,8 @@ void extractDir(fst_t fst, uint16_t entry, char* parent)
 
 		printf("dir: %s\n", path);
 
-		mkdir(path);
-		
+		makeDirectory(path);
+	
 	}
 	else
 	{
@@ -455,7 +474,7 @@ void extractDir(fst_t fst, uint16_t entry, char* parent)
 	free(path);
 
 	if (fst.sub != 0xffff)
-		extractFST(fst.sub, newfilename); 
+		extractFST(fst.sub, newfilename);
 
 	free(newfilename);
 }
@@ -466,19 +485,19 @@ void extractFile(fst_t fst, uint16_t entry, char* parent)
 	uint32_t cluster_span = (uint32_t) (fst.size / 0x4000) + 1;
 	byte_t* data = calloc(cluster_span * 0x4000, sizeof(byte_t));
 
-	char* filename = malloc(_MAX_PATH);
+	char* filename = malloc(maxPathNameSize);
 	snprintf(filename, 13, "%s", fst.filename);
 	//strlcpy(filename, (char*) fst.filename, 12);
 	stringReplaceAll(":", "-", filename);
 
-	char* newfilename = malloc(_MAX_PATH);
+	char* newfilename = malloc(maxPathNameSize);
 	newfilename[0] = '\0';
 	strcat(newfilename, "/");
 	strcat(newfilename, parent);
 	strcat(newfilename, "/");
 	strcat(newfilename, filename);
 
-	char* path = malloc(_MAX_PATH);
+	char* path = malloc(maxPathNameSize);
 	path[0] = '\0';
 
 	strcat(path, nandName);
@@ -523,7 +542,7 @@ byte_t* aesDecrypt(byte_t* key, byte_t* enc_data, size_t data_size)
 
 	struct AES_ctx ctx;
 	AES_init_ctx_iv(&ctx, key, iv);
-	
+
 	AES_CBC_decrypt_buffer(&ctx, dec_data, data_size);
 
 	free(iv);
